@@ -1,6 +1,6 @@
 <script>
 	// Environment
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	//
 
 	//Auth
@@ -24,7 +24,7 @@
 	//
 
 	//Store
-	import { loginStore, selectedChats, allChats } from '../stores/loginstore';
+	import { loginStore, selectedChats, allChats,userStore } from '../stores/loginstore';
 	import destr from 'destr';
 	import { marked } from 'marked';
 	//
@@ -40,19 +40,32 @@
 	let formModal = false;
 	let liked =null
 	let uid=null
-	selectedChats.subscribe((chats) => {
-		messages = chats || [];
-		if(messages.length===0){
-			if (user) {
-				img_uuid = `${user.uid}.${makeid(5)}`;
-			}
-		}
+	let storage = null;
+	const unsubscribe = userStore.subscribe(value => {
+        user = value;
+		if (user) {
+				uid=user.uid
+				const db = getFirestore(fApp);
+				const docRef = doc(db, 'chats', user.uid);
+				getDoc(docRef).then((docSnap)=>{
+				if (docSnap.exists()) {
+					previousChats = docSnap.data().allChats || {};
+				}
+				}).catch((err)=>{
+					previousChats=[]
+				});
+			} 
+		
+    });
+	const unsub=selectedChats.subscribe((chats) => {
+		messages = chats
 	});
-	$: if (previousChats) {
-		allChats.update((m) => {
-			return previousChats;
-		});
-	}
+	onDestroy(()=>{
+		unsub()
+		unsubscribe();
+	})
+	
+	
 	
 	onMount(() => {
 		if (!getApps().length) {
@@ -63,31 +76,12 @@
 		} else {
 			fApp = getApps()[0];
 		}
-		getAuth().onAuthStateChanged(async (currentUser) => {
-			user = currentUser;
-			if (user) {
-				localStorage.setItem('user', JSON.stringify(user));
-				uid=user.uid
-				const db = getFirestore(fApp);
-				const docRef = doc(db, 'chats', user.uid);
-				const docSnap = await getDoc(docRef);				
-				if (docSnap.exists()) {
-					previousChats = docSnap.data().allChats || {};
-				}
-				loginStore.set({ userName: user.displayName, photoURL: user.photoURL });
-			} 
-		});
-
-		const storedUser = localStorage.getItem('user');
-		if (storedUser) {
-			user = JSON.parse(storedUser);
-			img_uuid = `${user.uid}.${makeid(5)}`;
-		}
+		storage=getStorage();
 	});
 	function like(cont){
 
 		messages[messages.length-1].liked=cont
-		previousChats=saveChat(previousChats)
+		previousChats=saveChat(messages)
 	}
 	async function query(index) {
 		try {
@@ -133,7 +127,7 @@
 					}
 					await new Promise((resolve) => setTimeout(resolve, 30));
 				}catch(e){
-					console.log(e,textChunks)
+					console.error(e)
 				}
 			}
     }
@@ -148,11 +142,11 @@
 			inputValue = '';
 			messages = [...messages, { text: "...", isUser: false,timeStamp:new Date().toString(),liked:liked }];
 			await query(messages.length-1);
-			previousChats = saveChat(previousChats);
+			saveChat(messages);
 		}
 	}
 
-	function saveChat(previousChats) {
+	function saveChat(messages) {
 		if (messages.length > 0) {
 			let title = messages[0].text;
 			let i = 0;
@@ -160,29 +154,73 @@
 				i += 1;
 				title = messages[i].text;
 			}
-			previousChats[title] = { messages: messages };
+			allChats.update((m)=>{
+				m[title]=messages;
+				return m;
+			})
 		}
 		const db = getFirestore(fApp);
 
 		setDoc(doc(db, 'chats', user.uid), { allChats: previousChats });
 		return previousChats;
 	}
-	function handleFileUpload(event) {
-		const file = event.target.files[0];
-		if (file) {
-			const storage = getStorage();
-			const storageRef = ref(storage, img_uuid);
-			const imageURL = URL.createObjectURL(file);
-			messages = [...messages, { image: imageURL, isUser: true }];
-			let i = messages.length - 1;
-			uploadBytes(storageRef, file).then((snapshot) => {
-				getDownloadURL(snapshot.ref).then((url) => {
-					image_link = url;
-					messages[i].image = image_link;
-				});
-			});
-		}
-	}
+	async function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    const fileHash = await generateFileHash(file);
+    const storageRef = ref(storage, fileHash); 
+
+    try {
+      const existingUrl = await checkIfImageExists(storageRef);
+      if (existingUrl) {
+        messages = [...messages, { image: existingUrl, isUser: true }];
+      } else {
+        const imageURL = URL.createObjectURL(file);  
+        const index = messages.length;
+
+        messages = [...messages, { image: imageURL, isUser: true, loading: true }];
+
+        const snapshot = await uploadBytes(storageRef, file); 
+        const url = await getDownloadURL(snapshot.ref); 
+
+        messages[index].image = url;
+        messages[index].loading = false;
+      }
+    } catch (error) {
+      console.error('Error uploading or checking image:', error);
+    }
+  }
+
+  async function generateFileHash(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const buffer = reader.result;
+        crypto.subtle.digest('SHA-256', buffer).then((hashBuffer) => {
+          resolve(hexString(hashBuffer));  // Convert hash buffer to hex string
+        }).catch(reject);
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);  // Read file as array buffer for hashing
+    });
+  }
+
+  function hexString(buffer) {
+    const byteArray = new Uint8Array(buffer);
+    return Array.from(byteArray).map(byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function checkIfImageExists(storageRef) {
+    try {
+      const url = await getDownloadURL(storageRef);  
+      return url;  
+    } catch (error) {
+      if (error.code === 'storage/object-not-found') {
+        return null; 
+      }
+      throw error;  
+    }
+  }
 	function makeid(length) {
 		let result = '';
 		const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -206,7 +244,7 @@
 >
 	<div class="flex flex-col w-full h-[90vh]">
 		<!--Chat Section-->
-		{#if messages.length > 0}
+		{#if messages && messages.length > 0}
 			<!--Chats-->
 			<div class="flex flex-col overflow-y-auto h-full gap-4">
 				{#each messages as message}

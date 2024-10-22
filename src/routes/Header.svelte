@@ -1,14 +1,9 @@
 <script>
 	import { getAuth } from 'firebase/auth';
-	import { getApps, initializeApp } from 'firebase/app';
-	import { firebaseConfig } from '$lib/firebase_config'; 
-	import { doc, setDoc, getFirestore, getDoc } from 'firebase/firestore';
-
-	import { loginStore,allChats ,selectedChats} from '../stores/loginstore';
-
+	import { userStore,allChats ,selectedChats} from '../stores/loginstore';
 	import {Dropdown, DropdownDivider, DropdownItem, Drawer,CloseButton,Sidebar,SidebarGroup,SidebarItem,SidebarWrapper} from 'flowbite-svelte';
 	import { sineIn } from 'svelte/easing';
-	import { onMount } from 'svelte';
+	import { onDestroy} from 'svelte';
 	import icon from '$lib/images/icon.png';
 	import { goto } from '$app/navigation';
 
@@ -28,38 +23,12 @@
 		duration: 200,
 		easing: sineIn
 	};
-	allChats.subscribe((m)=>{
+	const unsub=allChats.subscribe((m)=>{
     	previousChats=m
 	})
-	onMount(() => {
-		if (!getApps().length) {
-			fApp = initializeApp(firebaseConfig, {
-				experimentalForceLongPolling: true,
-				useFetchStreams: false
-			});
-		}else{
-            fApp=getApps()[0]
-        }
-        
-		getAuth().onAuthStateChanged(async (currentUser) => {
-			user = currentUser;
-			if (user) {
-				localStorage.setItem('user', JSON.stringify(user));
-				const db = getFirestore(fApp);
-				const docRef = doc(db, 'chats', user.uid);
-				const docSnap = await getDoc(docRef);
-				if (docSnap.exists()) {
-					previousChats = docSnap.data().allChats||{};
-				}
-				loginStore.set({userName:user.displayName,photoURL:user.photoURL})
-
-			} 
-		});
-	
-
-		
-	});
-
+	onDestroy(()=>{
+		unsub();
+	})
 	function toggleSidebar() {
 			hidden2 = !hidden2;
 	}
@@ -71,47 +40,24 @@
 			selectedChats.update((m)=>{return messages})
 			
 	}
-	function saveChat() {
-			if (messages.length > 0) {
-				let title = messages[0].text;
-				let i = 0;
-				while (!title && i < messages.length) {
-					i += 1;
-					title = messages[i].text;
-				}
-				previousChats[title] = { messages: messages };
-			}
-			fApp = initializeApp(firebaseConfig, {
-				experimentalForceLongPolling: true, // this line
-				useFetchStreams: false
-			});
-			const db = getFirestore(fApp);
-
-			setDoc(doc(db, 'chats', user.uid), { allChats: previousChats });
-	}
 	function selectChat(chat) {
 			selectedChat = chat;
-			messages = chat.messages;
-			selectedChats.update((chats)=>{
-				return messages
-			})
+			
+			selectedChats.set(chat);
 	}
 	function removeChat(chatId) {
 			delete previousChats[chatId];
+			selectedChats.set([]);
 			previousChats = previousChats;
-			saveChat();
+			allChats.set(previousChats);
 	}
 	async function signOut(){
 		try {
 			await getAuth().signOut();
-			user = null;
-			localStorage.removeItem('user');
-			loginStore.set({userName:null,pf_photo:null})
 		} catch (error) {
 			console.error(error.message);
 		}
 	}
-	let nav=['Ask','Notes','Learn','Assessment','Report Generation'];
 
 </script>
 
@@ -188,7 +134,7 @@
 					</div>
 				</SidebarGroup>
 				<SidebarGroup>
-					<SidebarItem class="ml-0 font-medium mt-4 w-60 h-8" label="Ask" {spanClass} on:click={()=>{toggleSidebar();goto("/");}} href="/">
+					<SidebarItem class="ml-0 font-medium mt-4 w-60 h-8" label="Ask" {spanClass} on:click={()=>{toggleSidebar();}} href="/">
 						<svelte:fragment slot="icon">
 							<svg
 								width="18"
@@ -214,7 +160,7 @@
 							</svg>
 						</svelte:fragment>
 					</SidebarItem>
-					<SidebarItem class="ml-0 font-medium w-60 h-8" label="Transcribe" {spanClass}  on:click={()=>{window.location.href="/transcribe";toggleSidebar()}}>
+					<SidebarItem class="ml-0 font-medium w-60 h-8" label="Transcribe" {spanClass}  on:click={()=>{toggleSidebar();}} href="/transcribe">
 						<svelte:fragment slot="icon">
 							<svg
 								width="12"
@@ -244,7 +190,7 @@
 							</svg>
 						</svelte:fragment>
 					</SidebarItem>
-					<SidebarItem class="ml-0 font-medium w-60 h-8" label="Patients" {spanClass}  on:click={()=>{window.location.href="/patients";toggleSidebar()}}>
+					<SidebarItem class="ml-0 font-medium w-60 h-8" label="Patients" {spanClass}  on:click={()=>{toggleSidebar()}} href="/patients">
 						<svelte:fragment slot="icon">
 							<svg
 								width="12"
@@ -344,14 +290,14 @@
 		<h1 class="text-2xl font-bold">AI Nursing Engine</h1>
 	</div>
 <div class="flex flex-row justify-center items-center gap-2">
-{#if $loginStore.userName}
+{#if $userStore}
 	<div class="flex flex-row justify-center items-center">
 	<button>
-	<img src={$loginStore.photoURL} class="h-8 w-8 rounded-full " referrerpolicy="no-referrer" alt=""/>
+	<img src={$userStore.photoURL} class="h-8 w-8 rounded-full " referrerpolicy="no-referrer" alt=""/>
 	</button>
 	
 	<Dropdown>
-		<DropdownItem>{$loginStore.userName}</DropdownItem>
+		<DropdownItem>{$userStore.displayName}</DropdownItem>
 		<DropdownDivider/>
 		<DropdownItem on:click={signOut} slots="footer">Sign out</DropdownItem>
 	</Dropdown>

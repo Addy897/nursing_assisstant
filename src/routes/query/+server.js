@@ -4,24 +4,10 @@ export const config = {
 import { AI_API } from '$env/static/private';
 /** @type {import('./$types').RequestHandler} */
 
-function build_prompt(messages,model){
+function build_prompt(messages){
 	messages.pop()
 	let DEFAULT_IMAGE_TOKEN = "<image>"
     let pr="System:\nYou are a Health Education Assistant who provides simplified information purely for educational purposes and avoids giving treatment or medical advice.\n\n"
-
-    if(model==="Anatomy"){
-        pr="System:\nYou are an AI specialized in human anatomy, providing accurate information on body structure and function, and suggesting relevant sources for non-anatomy questions.\n\n"
-    }else if(model==="Microbiology"){
-        pr="System:\nYou are an AI specialized in microbiology, providing accurate and detailed information on microbiological topics, and directing users to relevant sources for non-microbiology questions.\n\n"
-    }else if(model==="Pharmacology"){
-        pr="System:\nYou are an AI specialized in pharmacology, offering detailed information on drug interactions, mechanisms, uses, side effects, and pharmacokinetics, and guiding users to relevant sources for non-pharmacology questions.\n\n"
-    }else if(model==="BioChemistry"){
-        pr="System:\nYou are an AI specialized in BioChemistry, providing accurate information on BioChemistry, and suggesting relevant sources for non-BioChemistry questions.\n\n"
-    }else if(model==="Physiology"){
-        pr="System:\nYou are an AI specialized in Physiology, providing accurate information on Physiology, and suggesting relevant sources for non-Physiology questions.\n\n"
-    }else if(model==="Pathology"){
-        pr="System:\nYou are an AI specialized in Pathology, providing accurate information on Pathology, and suggesting relevant sources for non-Pathology questions.\n\n"
-    }
 	let images=[]
 	for(let i=0;i<messages.length;i++){
 		if(messages[i].text){
@@ -38,15 +24,15 @@ function build_prompt(messages,model){
 }
 export async function POST({ request }) {
     try {
-        const { messages,model} = await request.json();
-        let {pr,images}=build_prompt(messages,model)
+        const { messages} = await request.json();
+        let {pr,images}=build_prompt(messages)
 		
         const data = {
             prompt: pr,
 			images:images,
  			"stop":"\n\n",
-			"temperature": 0.5,
-			"top_p": 0.5,
+			"temperature": 0.2,
+			"top_p": 0.9,
 			"max_new_tokens": 1024,
         };
 
